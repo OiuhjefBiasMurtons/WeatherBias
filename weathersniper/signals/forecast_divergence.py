@@ -80,8 +80,20 @@ async def evaluate_forecast_divergence(
         )
         return []
 
-    confidence = 0.70
-    confidence_detail = "base 70%"
+    # Escalar confianza por magnitud de divergencia:
+    # 15-20% → 0.70 | 20-30% → 0.75 | 30-40% → 0.80 | >40% → 0.85
+    if divergence >= 0.40:
+        confidence = 0.85
+        confidence_detail = f"85% (divergencia {divergence:.0%} ≥40%)"
+    elif divergence >= 0.30:
+        confidence = 0.80
+        confidence_detail = f"80% (divergencia {divergence:.0%} ≥30%)"
+    elif divergence >= 0.20:
+        confidence = 0.75
+        confidence_detail = f"75% (divergencia {divergence:.0%} ≥20%)"
+    else:
+        confidence = 0.70
+        confidence_detail = f"70% base (divergencia {divergence:.0%})"
 
     signals: list[Signal] = []
 

@@ -85,7 +85,8 @@ CREATE TABLE metar_snapshots (
     temp_f          FLOAT NOT NULL,
     observed_at     TIMESTAMPTZ NOT NULL,
     raw             JSONB,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(city_id, observed_at)
 );
 
 -- Indices utiles

@@ -82,18 +82,18 @@ async def get_metar(icao: str) -> METARReading | None:
         raw=obs,
     )
 
-    # Guardar snapshot en Supabase
+    # Guardar snapshot en Supabase (upsert para evitar duplicados por ciclo)
     try:
         sb = get_supabase()
-        sb.table("metar_snapshots").insert({
+        sb.table("metar_snapshots").upsert({
             "city_id": _icao_to_city_id(icao),
             "icao": icao,
             "temp_c": reading.temp_c,
             "temp_f": reading.temp_f,
             "observed_at": reading.observed_at.isoformat(),
             "raw": reading.raw,
-        }).execute()
-        logger.debug("METAR snapshot saved icao=%s temp_c=%.1f", icao, temp_c)
+        }, on_conflict="city_id,observed_at").execute()
+        logger.debug("METAR snapshot upserted icao=%s temp_c=%.1f", icao, temp_c)
     except Exception as exc:
         logger.error("Failed to save METAR snapshot icao=%s: %s", icao, exc)
 

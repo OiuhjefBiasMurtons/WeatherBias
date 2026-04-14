@@ -42,6 +42,12 @@ async def run_signal_cycle() -> int:
     for mkt in all_markets:
         markets_by_city.setdefault(mkt.city_id, []).append(mkt)
 
+    # Alertar si Polymarket no devolvió ningún mercado (posible fallo de API)
+    if not all_markets:
+        logger.error("Signal cycle: Polymarket returned 0 markets — possible API failure")
+        from weathersniper.alerts.telegram import send_message
+        await send_message("⚠️ WeatherSniper: Polymarket devolvió 0 mercados. Posible fallo de API o sin mercados activos.")
+
     for city_id, city in city_configs.items():
         if not city.active:
             continue
