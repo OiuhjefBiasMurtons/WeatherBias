@@ -135,12 +135,19 @@ async def _job_cleanup_markets() -> None:
 async def _job_daily_report() -> None:
     """Envia reporte diario por Telegram."""
     try:
+        from datetime import date, timedelta
         sb = get_supabase()
+
+        yesterday = date.today() - timedelta(days=1)
+        since = f"{yesterday.isoformat()}T00:00:00+00:00"
+        until = f"{date.today().isoformat()}T00:00:00+00:00"
 
         # Trades del dia anterior
         trades = (
             sb.table("trades")
             .select("side, size_usdc, pnl_usdc, status")
+            .gte("created_at", since)
+            .lt("created_at", until)
             .execute()
         )
 
@@ -152,11 +159,11 @@ async def _job_daily_report() -> None:
         win_rate = won / (won + lost) * 100 if (won + lost) > 0 else 0
 
         report = (
-            f"\U0001f4ca Reporte Diario WeatherSniper\n\n"
+            f"\U0001f4ca Reporte Diario WeatherSniper — {yesterday.strftime('%d/%m/%Y')}\n\n"
             f"Total trades: {total_trades}\n"
             f"Ganados: {won} | Perdidos: {lost}\n"
             f"Win rate: {win_rate:.0f}%\n"
-            f"PnL total: ${total_pnl:.2f} USDC\n"
+            f"PnL: ${total_pnl:.2f} USDC\n"
         )
 
         await send_message(report)

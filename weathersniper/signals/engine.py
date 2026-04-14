@@ -138,9 +138,15 @@ async def run_signal_cycle() -> int:
     return new_count
 
 
+_SIGNAL_DEDUP_HOURS = 4  # No re-alertar si ya existe una señal <= N horas de antiguedad
+
+
 async def _signal_already_pending(signal: Signal) -> bool:
-    """Retorna True si ya existe una señal pending para el mismo mercado+bracket+side."""
+    """Retorna True si ya existe una señal pending para el mismo mercado+bracket+side
+    creada en las últimas _SIGNAL_DEDUP_HOURS horas."""
     try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=_SIGNAL_DEDUP_HOURS)).isoformat()
         sb = get_supabase()
         resp = (
             sb.table("signals")
@@ -150,6 +156,7 @@ async def _signal_already_pending(signal: Signal) -> bool:
             .eq("bracket_high", signal.bracket_high)
             .eq("side", signal.side.value)
             .eq("status", "pending")
+            .gte("created_at", cutoff)
             .limit(1)
             .execute()
         )
