@@ -184,3 +184,66 @@ async def reject_signal(signal_id: int):
 
     sb.table("signals").update({"status": "rejected"}).eq("id", signal_id).execute()
     return {"status": "rejected"}
+
+
+@app.post("/debug/cycle")
+async def debug_cycle():
+    """
+    Ejecuta el ciclo de señales manualmente y devuelve diagnóstico completo.
+    Util para verificar que el flujo funciona sin esperar al cron.
+    """
+    from weathersniper.config import CITIES, SIGNAL_MIN_CONFIDENCE
+    from weathersniper.data.forecast import get_forecast
+    from weathersniper.data.metar import get_metar
+    from weathersniper.data.polymarket import fetch_temperature_markets
+    from weathersniper.signals.models import CityConfig
+    from weathersniper.alerts.telegram import _app as tg_app
+
+    result: dict = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "telegram_bot_initialized": tg_app is not None,
+        "markets_total": 0,
+        "cities": {},
+        "signals_generated": 0,
+        "signals_sent": 0,
+    }
+
+    # 1. Polymarket markets
+    all_markets = await fetch_temperature_markets()
+    result["markets_total"] = len(all_markets)
+    markets_by_city: dict = {}
+    for mkt in all_markets:
+        markets_by_city.setdefault(mkt.city_id, []).append(mkt)
+
+    # 2. Por ciudad: METAR + forecast + mercados disponibles
+    for city_cfg in CITIES:
+        if not city_cfg.get("active", True):
+            continue
+        city_id = city_cfg["id"]
+        city = CityConfig(**city_cfg)
+
+        metar = await get_metar(city.icao)
+        forecast = await get_forecast(city) or {}
+
+        city_markets = markets_by_city.get(city_id, [])
+        result["cities"][city_id] = {
+            "metar_ok": metar is not None,
+            "metar_temp_c": metar.temp_c if metar else None,
+            "metar_observed": metar.observed_at.isoformat() if metar else None,
+            "forecast_dates": len(forecast),
+            "markets_found": len(city_markets),
+        }
+
+    # 3. Correr ciclo real y contar
+    from weathersniper.scheduler.jobs import _job_signal_cycle
+    # Capturar cuántas señales se envían chequeando conteo antes/después
+    from weathersniper.db.client import get_supabase
+    sb = get_supabase()
+    before = sb.table("signals").select("id", count="exact").execute().count or 0
+    new_alerts = await _job_signal_cycle()
+    after = sb.table("signals").select("id", count="exact").execute().count or 0
+
+    result["signals_generated"] = after - before
+    result["signals_sent"] = new_alerts
+
+    return result
