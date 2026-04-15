@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, timedelta
 
 import pytz
 
@@ -33,12 +33,11 @@ async def evaluate_end_of_day(
     3. Temperatura estable: delta ultimas 2h < EOD_MAX_TEMP_DELTA_LAST_2H
     4. Temperatura actual < bracket_high de algun outcome con precio > 0.10
     """
-    today_utc = datetime.now(timezone.utc).date()
-    if market.target_date != today_utc:
-        return []
-
     tz = pytz.timezone(city.timezone)
     now_local = datetime.now(tz)
+    today_local = now_local.date()
+    if market.target_date != today_local:
+        return []
     hours_past_peak = (
         now_local.hour + now_local.minute / 60 - city.peak_hour_local
     )
@@ -60,9 +59,16 @@ async def evaluate_end_of_day(
         return []
 
     # Obtener max temp del dia de metar_snapshots
-    max_temp_c, snapshots = await _get_day_max_temp(city.id, city.unit)
-    if max_temp_c is None:
-        max_temp_c = market.last_metar.temp_c
+    max_temp_c, snapshots = await _get_day_max_temp(city.id, city.unit, today_local, city.timezone)
+    # Si los snapshots devuelven un max menor que el METAR actual, el METAR es más fresco
+    if market.last_metar:
+        if max_temp_c is None:
+            max_temp_c = market.last_metar.temp_c
+        else:
+            max_temp_c = max(max_temp_c, market.last_metar.temp_c)
+    elif max_temp_c is None:
+        logger.info("EOD skip city_id=%s: no max temp available", city.id)
+        return []
     logger.info("EOD city_id=%s max_temp_c=%.1f snapshots=%d", city.id, max_temp_c, len(snapshots))
 
     # Verificar estabilidad: delta entre temp actual y max de ultimas 2h
@@ -178,16 +184,18 @@ def _calculate_confidence(
     return min(max(confidence, 0.0), 1.0), " ".join(parts)
 
 
-async def _get_day_max_temp(city_id: str, unit: str) -> tuple[float | None, list]:
+async def _get_day_max_temp(city_id: str, unit: str, target_date: date, city_timezone: str) -> tuple[float | None, list]:
     """Obtiene la temperatura maxima del dia de los snapshots de METAR."""
     try:
         sb = get_supabase()
-        today_str = date.today().isoformat()
+        tz = pytz.timezone(city_timezone)
+        local_midnight = tz.localize(datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0))
+        local_midnight_utc = local_midnight.astimezone(pytz.utc).isoformat()
         resp = (
             sb.table("metar_snapshots")
             .select("temp_c, temp_f, observed_at")
             .eq("city_id", city_id)
-            .gte("observed_at", f"{today_str}T00:00:00+00:00")
+            .gte("observed_at", local_midnight_utc)
             .order("observed_at", desc=True)
             .execute()
         )

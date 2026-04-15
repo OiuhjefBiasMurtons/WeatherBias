@@ -82,18 +82,33 @@ async def get_metar(icao: str) -> METARReading | None:
         raw=obs,
     )
 
-    # Guardar snapshot en Supabase (upsert para evitar duplicados por ciclo)
+    # Guardar snapshot en Supabase
+    # Intenta upsert con constraint; fallback a insert si la constraint no existe aún.
     try:
         sb = get_supabase()
-        sb.table("metar_snapshots").upsert({
+        row = {
             "city_id": _icao_to_city_id(icao),
             "icao": icao,
             "temp_c": reading.temp_c,
             "temp_f": reading.temp_f,
             "observed_at": reading.observed_at.isoformat(),
             "raw": reading.raw,
-        }, on_conflict="city_id,observed_at").execute()
-        logger.debug("METAR snapshot upserted icao=%s temp_c=%.1f", icao, temp_c)
+        }
+        try:
+            sb.table("metar_snapshots").upsert(row, on_conflict="city_id,observed_at").execute()
+        except Exception as upsert_exc:
+            if "42P10" in str(upsert_exc) or "no unique or exclusion constraint" in str(upsert_exc):
+                # Constraint no existe en el live DB todavía — usar insert ignorando duplicados
+                try:
+                    sb.table("metar_snapshots").insert(row).execute()
+                except Exception as insert_exc:
+                    if "23505" not in str(insert_exc) and "duplicate" not in str(insert_exc).lower():
+                        logger.error("Failed to save METAR snapshot icao=%s: %s", icao, insert_exc)
+                    else:
+                        logger.debug("METAR snapshot already exists icao=%s", icao)
+            else:
+                raise upsert_exc
+        logger.debug("METAR snapshot saved icao=%s temp_c=%.1f", icao, temp_c)
     except Exception as exc:
         logger.error("Failed to save METAR snapshot icao=%s: %s", icao, exc)
 
