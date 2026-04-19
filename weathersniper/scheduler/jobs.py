@@ -1,6 +1,7 @@
 import logging
 from datetime import date, datetime
 
+import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from weathersniper.alerts.telegram import send_message
@@ -10,6 +11,27 @@ from weathersniper.data.polymarket import fetch_temperature_markets
 from weathersniper.db.client import get_supabase
 from weathersniper.signals.engine import run_signal_cycle
 from weathersniper.signals.models import CityConfig
+
+# Ventana peak: [peak_hour - 1, peak_hour + 2] en hora local
+_PEAK_WINDOW_BEFORE = 1
+_PEAK_WINDOW_AFTER = 2
+
+
+def _any_city_in_peak_window() -> bool:
+    """Devuelve True si alguna ciudad activa está dentro de su ventana peak ahora."""
+    for city in CITIES:
+        if not city.get("active"):
+            continue
+        try:
+            tz = pytz.timezone(city["timezone"])
+            now_local = datetime.now(tz)
+            peak = city["peak_hour_local"]
+            hour_now = now_local.hour + now_local.minute / 60
+            if (peak - _PEAK_WINDOW_BEFORE) <= hour_now <= (peak + _PEAK_WINDOW_AFTER):
+                return True
+        except Exception:
+            continue
+    return False
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +55,15 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
         minute="2,32",
         id="signal_cycle",
         name="Signal cycle",
+    )
+
+    # Job 2b: Ciclo peak — cada 5 min, solo si alguna ciudad está en ventana peak
+    scheduler.add_job(
+        _job_peak_signal_cycle,
+        "interval",
+        minutes=5,
+        id="peak_signal_cycle",
+        name="Peak window signal cycle",
     )
 
     # Job 3: Forecast update — cada 6 horas
@@ -86,6 +117,18 @@ async def _job_signal_cycle() -> None:
         logger.info("=== SIGNAL CYCLE END: %d new alerts sent ===", new_alerts)
     except Exception as exc:
         logger.error("=== SIGNAL CYCLE FAILED: %s ===", exc, exc_info=True)
+
+
+async def _job_peak_signal_cycle() -> None:
+    """Ciclo de señales en ventana peak — solo corre si alguna ciudad está en peak hours."""
+    if not _any_city_in_peak_window():
+        return
+    logger.info("=== PEAK SIGNAL CYCLE START %s ===", datetime.utcnow().strftime("%H:%M:%S UTC"))
+    try:
+        new_alerts = await run_signal_cycle()
+        logger.info("=== PEAK SIGNAL CYCLE END: %d new alerts sent ===", new_alerts)
+    except Exception as exc:
+        logger.error("=== PEAK SIGNAL CYCLE FAILED: %s ===", exc, exc_info=True)
 
 
 async def _job_forecast_update() -> None:

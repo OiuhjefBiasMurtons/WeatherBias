@@ -97,7 +97,7 @@ async def evaluate_end_of_day(
 
         # Bracket que contiene el max temp -> senal YES si precio bajo
         if outcome.bracket_low <= max_temp_market <= outcome.bracket_high:
-            if outcome.price < 0.85:
+            if 0.50 <= outcome.price < 0.95:
                 confidence, conf_detail = _calculate_confidence(
                     hours_past_peak, recent_temps, market.last_metar.raw
                 )
@@ -125,9 +125,8 @@ async def evaluate_end_of_day(
                 ))
 
         # Bracket por encima del max temp -> senal NO
-        # Solo si el mercado aun cree que hay >15% de probabilidad (YES > 0.15)
-        # Si YES ya esta en 0.02, el mercado ya lo sabe — no hay edge.
-        elif outcome.bracket_low > max_temp_market and 0.15 < outcome.price < 0.85:
+        # Solo si el mercado aun cree que hay >50% de probabilidad (YES > 0.50)
+        elif outcome.bracket_low > max_temp_market and 0.50 < outcome.price < 0.95:
             no_price = round(1 - outcome.price, 3)
             confidence, conf_detail = _calculate_confidence(
                 hours_past_peak, recent_temps, market.last_metar.raw
