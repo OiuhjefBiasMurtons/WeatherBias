@@ -55,9 +55,9 @@ async def evaluate_forecast_divergence(
 
     # Usar solo brackets reales para el consenso (excluir "or below" / "or higher")
     real_outcomes = [o for o in market.outcomes if _is_real_bracket(o)]
-    if not real_outcomes:
+    if not real_outcomes or max(o.price for o in real_outcomes) < 0.05:
         logger.debug(
-            "Forecast divergence skip city_id=%s: no real brackets (only sentinels)",
+            "Forecast divergence skip city_id=%s: no real brackets with meaningful price",
             city.id,
         )
         return []

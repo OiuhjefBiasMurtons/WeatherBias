@@ -133,6 +133,10 @@ async def run_signal_cycle() -> int:
             )
             skipped_count += 1
             continue
+        if signal.suggested_size_usdc <= 0:
+            logger.info("Signal skipped: size=0 city_id=%s market=%s", signal.city_id, signal.market_id)
+            skipped_count += 1
+            continue
         signal_id = await _persist_signal(signal)
         await send_signal_alert(signal, signal_id)
         new_count += 1
@@ -144,11 +148,11 @@ async def run_signal_cycle() -> int:
     return new_count
 
 
-_SIGNAL_DEDUP_HOURS = 4  # No re-alertar si ya existe una señal <= N horas de antiguedad
+_SIGNAL_DEDUP_HOURS = 7  # > ciclo GFS de 6h — evita re-emitir mismo forecast
 
 
 async def _signal_already_pending(signal: Signal) -> bool:
-    """Retorna True si ya existe una señal pending para el mismo mercado+bracket+side
+    """Retorna True si ya existe una señal pending para el mismo mercado
     creada en las últimas _SIGNAL_DEDUP_HOURS horas."""
     try:
         from datetime import datetime, timezone, timedelta
@@ -158,9 +162,6 @@ async def _signal_already_pending(signal: Signal) -> bool:
             sb.table("signals")
             .select("id")
             .eq("market_id", signal.market_id)
-            .eq("bracket_low", signal.bracket_low)
-            .eq("bracket_high", signal.bracket_high)
-            .eq("side", signal.side.value)
             .eq("status", "pending")
             .gte("created_at", cutoff)
             .limit(1)
